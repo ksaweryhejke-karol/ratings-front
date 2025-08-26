@@ -1,139 +1,147 @@
-import React, { useEffect, useMemo, useState } from "react";
-import {
-  LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid,
-  ResponsiveContainer, Scatter, ScatterChart
-} from "recharts";
+// src/ProgramTrendPage.tsx
+import { useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from "recharts";
+import { getAggregates, getMetrics } from "./lib/api";
 
-const API = import.meta.env.VITE_API_BASE ?? "";
+type DayItem = { t: string; amr: number };
 
-type TrendItem = {
-  date: string;
-  amr?: number | null;
-  avg_excl_breaks?: number | null;
-  avg_incl_breaks?: number | null;
-  rank_amr?: number | null;
-  points_minutes?: number | null;
-  shr_pct?: number | null;
-};
-
-type TrendResponse = { slug: string; days: number; items: TrendItem[] };
-
-function movingAverage(nums: number[], w = 7): (number | undefined)[] {
-  const out: (number | undefined)[] = new Array(nums.length).fill(undefined);
-  const buf: number[] = [];
-  let sum = 0;
-  let valid = 0;
-  for (let i = 0; i < nums.length; i++) {
-    const v = nums[i];
-    buf.push(v);
-    if (Number.isFinite(v)) { sum += v; valid++; }
-    if (buf.length > w) {
-      const removed = buf.shift()!;
-      if (Number.isFinite(removed)) { sum -= removed; valid--; }
-    }
-    out[i] = valid ? (sum / valid) : undefined;
-  }
-  return out;
+function fmtTime(ts?: string) {
+  if (!ts) return "—";
+  return new Date(ts).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
 }
 
 export default function ProgramTrendPage() {
-  const qs = new URLSearchParams(window.location.search);
-  const [slug, setSlug] = useState<string>(qs.get("slug") || "");
-  const [days, setDays] = useState<number>(Number(qs.get("days") || "56") || 56);
-  const [mode, setMode] = useState<"excl" | "incl">("excl");
-  const [raw, setRaw] = useState<TrendItem[]>([]);
+  const [sp] = useSearchParams();
+  const date = sp.get("date") || "";
+  const slug = sp.get("slug") || "";
+  const [lineup, setLineup] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [minutes, setMinutes] = useState<DayItem[]>([]);
+  const [series, setSeries] = useState<{ date: string; amr?: number }[]>([]);
+  const [avgType, setAvgType] = useState<"withBreaks"|"noBreaks">("noBreaks");
 
+  // 1) wczorajszy lineup (żeby odczytać tytuł i metryki scalone)
+  useEffect(() => {
+    if (!date) return;
+    setLoading(true);
+    fetch(`${import.meta.env.VITE_API_BASE}/programs?date=${date}`)
+      .then(r => r.json())
+      .then(d => setLineup(d.programs || []))
+      .finally(() => setLoading(false));
+  }, [date]);
+
+  // 2) historia emisji (trend)
   useEffect(() => {
     if (!slug) return;
-    setLoading(true);
-    setErr(null);
-    fetch(`${API}/program-trend?slug=${encodeURIComponent(slug)}&days=${days}`)
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() as Promise<TrendResponse>; })
-      .then(json => { setRaw(Array.isArray(json.items) ? json.items : []); })
-      .catch(e => setErr(String(e)))
-      .finally(() => setLoading(false));
-  }, [slug, days]);
+    fetch(`${import.meta.env.VITE_API_BASE}/program-history?slug=${slug}`)
+      .then(r => r.json())
+      .then(d => {
+        const s = (d.series || []) as {date: string; amr?: number}[];
+        setSeries(s);
+      })
+      .catch(() => setSeries([]));
+  }, [slug]);
 
-  const rows = useMemo(() => {
-    return raw.map((it: any) => {
-      const yCore = typeof it.amr === "number" ? it.amr : null;
-      const yEx = typeof it.avg_excl_breaks === "number" ? it.avg_excl_breaks : null;
-      const yIn = typeof it.avg_incl_breaks === "number" ? it.avg_incl_breaks : null;
-      const y = yCore ?? (mode === "excl" ? yEx : yIn) ?? yEx ?? yIn;
-      return { date: String(it.date), amr: y ?? null };
-    });
-  }, [raw, mode]);
+  // 3) 5-min tego dnia (podgląd retencji/peak)
+  useEffect(() => {
+    if (!date) return;
+    getMetrics(date).then(d => setMinutes(d.points || []));
+  }, [date]);
 
-  const chartData = useMemo(() => {
-    const n = rows.map(r => (typeof r.amr === "number" ? r.amr : NaN));
-    const ma7 = movingAverage(n, 7);
-    return rows.map((r, i) => ({
-      date: r.date,
-      amr: Number.isFinite(n[i]) ? n[i] : undefined,
-      ma7: ma7[i],
+  const program = useMemo(() => lineup.find(p => (p.slug === slug)), [lineup, slug]);
+  const chartTrend = useMemo(() => {
+    return series.map(s => ({
+      label: s.date,
+      amr: s.amr ?? null,
     }));
-  }, [rows]);
+  }, [series]);
+
+  const chartMinutes = useMemo(() => {
+    return minutes.map(p => ({
+      t: new Date(p.t),
+      label: new Date(p.t).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" }),
+      amr: p.amr,
+    }));
+  }, [minutes]);
 
   return (
-    <div className="min-h-screen bg-[#0b0f1a] text-white">
-      <div className="max-w-6xl mx-auto px-4 py-6">
-        <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">
-          Trend programu {slug && <span className="text-cyan-400">({slug})</span>}
-        </h1>
-
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <label className="bg-white/5 rounded-2xl p-3 border border-white/10">
-            <span className="text-sm text-white/70">Slug programu</span>
-            <input
-              value={slug}
-              onChange={e => setSlug(e.target.value.trim())}
-              className="mt-1 w-full bg-transparent outline-none border border-white/20 rounded-xl px-3 py-2"
-              placeholder="np. serwis-informacyjny"
-            />
-          </label>
-
-          <label className="bg-white/5 rounded-2xl p-3 border border-white/10">
-            <span className="text-sm text-white/70">Liczba emisji (dni)</span>
-            <input
-              type="number" min={7} max={180} value={days}
-              onChange={e => setDays(Math.max(7, Math.min(180, Number(e.target.value) || 56)))}
-              className="mt-1 w-full bg-transparent outline-none border border-white/20 rounded-xl px-3 py-2"
-            />
-          </label>
-
-          <div className="bg-white/5 rounded-2xl p-3 border border-white/10">
-            <span className="text-sm text-white/70">Status</span>
-            <div className="mt-1 text-white/90">{loading ? "Ładowanie…" : `Wczytano ${raw.length} emisji`}</div>
-          </div>
-        </div>
-
-        <div className="mt-6 bg-gradient-to-br from-white/5 to-white/0 rounded-2xl p-4 border border-cyan-500/20 shadow-[0_0_60px_rgba(34,211,238,0.15)]">
-          <h2 className="text-lg font-medium mb-2">AMR (emisja) + MA7</h2>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 6" stroke="#2b3344" />
-                <XAxis dataKey="date" tick={{ fill: "#9fb3c8" }} />
-                <YAxis tick={{ fill: "#9fb3c8" }} />
-                <Tooltip
-                  contentStyle={{ background: "#0b1220", border: "1px solid #224", borderRadius: 12 }}
-                  labelStyle={{ color: "#cce4ff" }}
-                  formatter={(v: any, n: any) => [typeof v === "number" ? Math.round(v) : v, n === "ma7" ? "MA7" : "AMR"]}
-                />
-                <Line type="monotone" dataKey="ma7" stroke="#22d3ee" dot={false} strokeWidth={2} />
-                <ScatterChart>
-                  <Scatter data={chartData} dataKey="amr" fill="#93c5fd" />
-                </ScatterChart>
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-          <p className="mt-2 text-sm text-white/70">
-            Kropki: pojedyncze emisje (AMR). Linia: ruchoma średnia z 7 emisji (MA7).
-          </p>
-        </div>
+    <div style={{ padding: 24, maxWidth: 1200, margin: "0 auto", color: "white", fontFamily: "Inter, system-ui, sans-serif" }}>
+      <div style={{ marginBottom: 12 }}>
+        <Link to="/" style={{ opacity: 0.7 }}>← Wróć do dnia</Link>
       </div>
+      <h1 style={{ fontSize: 26, marginBottom: 8 }}>
+        Trend: {program?.title || slug}
+      </h1>
+      <div style={{ opacity: 0.7, marginBottom: 16 }}>
+        Dzień: {date || "—"} • okno 02:00 → 02:00
+      </div>
+
+      {/* SERIA EMISJI */}
+      <section style={{ margin: "18px 0" }}>
+        <div style={{ marginBottom: 8, fontWeight: 600 }}>Ostatnie emisje (AMR)</div>
+        <div style={{ height: 260, background: "#0f172a", borderRadius: 12, padding: 8 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartTrend}>
+              <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+              <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+              <Tooltip
+                formatter={(v: any) => [Number(v).toLocaleString("pl-PL"), "AMR"]}
+                labelFormatter={(l) => `Data: ${l}`}
+              />
+              <Line type="monotone" dataKey="amr" dot strokeWidth={2} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
+      {/* METRYKI EMISJI DNIA */}
+      {program && (
+        <section style={{ margin: "18px 0" }}>
+          <div style={{ marginBottom: 8, fontWeight: 600 }}>Dzisiejsza emisja (po scaleniu przerw)</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
+            <Card title="Start">{fmtTime(program.start)}</Card>
+            <Card title="Koniec">{fmtTime(program.end)}</Card>
+            <Card title="Czas [min]">{program.duration_min ?? "—"}</Card>
+            <Card title="AMR">{program.amr?.toLocaleString("pl-PL") ?? "—"}</Card>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginTop: 12 }}>
+            <Card title="SHR %">{program.shr_pct != null ? (program.shr_pct*100).toFixed(2) : "—"}</Card>
+            <Card title="Break penalty">{program.break_penalty != null ? `${program.break_penalty}` : "—"}</Card>
+            <Card title="Recovery [min]">{program.recovery_time ?? "—"}</Card>
+            <Card title="Lead-in / out">{[program.lead_in_delta ?? "—", program.lead_out_delta ?? "—"].join(" / ")}</Card>
+          </div>
+        </section>
+      )}
+
+      {/* 5-MIN DNIA */}
+      <section style={{ margin: "18px 0" }}>
+        <div style={{ marginBottom: 8, fontWeight: 600 }}>Wykres 5-min (dzień)</div>
+        <div style={{ height: 280, background: "#0f172a", borderRadius: 12, padding: 8 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartMinutes}>
+              <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+              <XAxis dataKey="label" minTickGap={32} tick={{ fontSize: 12 }} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+              <Tooltip
+                formatter={(v: any) => [Number(v).toLocaleString("pl-PL"), "Widzowie"]}
+                labelFormatter={(l) => `Czas: ${l}`}
+              />
+              <Line type="monotone" dataKey="amr" dot={false} strokeWidth={2} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Card({ title, children }: { title: string; children: any }) {
+  return (
+    <div style={{ background: "#0f172a", padding: 12, borderRadius: 12 }}>
+      <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>{title}</div>
+      <div style={{ fontSize: 20 }}>{children}</div>
     </div>
   );
 }

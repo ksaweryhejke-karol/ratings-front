@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { listDays, getAggregates, getMetrics } from "./lib/api";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 
 function fmtTime(iso?: string) {
   if (!iso) return "";
@@ -15,6 +24,7 @@ export default function ProgramyPage() {
   const [aggr, setAggr] = useState<any>(null);
   const [points, setPoints] = useState<{ t: string; amr: number }[]>([]);
 
+  // load days and preselect newest
   useEffect(() => {
     (async () => {
       const d = await listDays();
@@ -23,6 +33,7 @@ export default function ProgramyPage() {
     })();
   }, []);
 
+  // load aggregates + 5-min metrics for selected day
   useEffect(() => {
     if (!date) return;
     setLoading(true);
@@ -36,47 +47,115 @@ export default function ProgramyPage() {
 
   const chartData = useMemo(
     () =>
-      points.map(p => ({
+      points.map((p) => ({
         t: new Date(p.t),
-        label: new Date(p.t).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" }),
+        label: new Date(p.t).toLocaleTimeString("pl-PL", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
         amr: p.amr,
       })),
     [points]
   );
 
   return (
-    <div style={{ padding: 24, maxWidth: 1200, margin: "0 auto", color: "white", fontFamily: "Inter, system-ui, sans-serif" }}>
+    <div
+      style={{
+        padding: 24,
+        maxWidth: 1200,
+        margin: "0 auto",
+        color: "white",
+        fontFamily: "Inter, system-ui, sans-serif",
+      }}
+    >
       <h1 style={{ fontSize: 28, marginBottom: 8 }}>Nielsen — Programy & 5-min</h1>
-      <div style={{ opacity: 0.7, marginBottom: 16 }}>Okno: 02:00 → 02:00 (Europe/Warsaw)</div>
+      <div style={{ opacity: 0.7, marginBottom: 4 }}>
+        Okno: 02:00 → 02:00 (Europe/Warsaw)
+      </div>
+
+      {/* simple nav */}
+      <nav style={{ margin: "8px 0 16px 0" }}>
+        <Link to="/" style={{ marginRight: 12, opacity: 0.9 }}>
+          Dzień
+        </Link>
+        <Link to="/konkurencja" style={{ opacity: 0.9 }}>
+          Konkurencja
+        </Link>
+      </nav>
 
       <label style={{ display: "inline-block", marginRight: 12 }}>
         Data:&nbsp;
-        <select value={date} onChange={(e) => setDate(e.target.value)} style={{ padding: 6, borderRadius: 8 }}>
-          {days.map(d => <option key={d} value={d}>{d}</option>)}
+        <select
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          style={{ padding: 6, borderRadius: 8 }}
+        >
+          {days.map((d) => (
+            <option key={d} value={d}>
+              {d}
+            </option>
+          ))}
         </select>
       </label>
 
       {aggr && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, margin: "16px 0" }}>
-          <Card title="Peak viewers">{aggr.topline?.peak_viewers?.toLocaleString("pl-PL")}</Card>
-          <Card title="Average viewers">{aggr.topline?.average_viewers?.toLocaleString("pl-PL")}</Card>
-          <Card title="Points (minutes)">{aggr.topline?.points_minutes}</Card>
-          <Card title="SHR %">{aggr.topline?.shr_pct != null ? (aggr.topline.shr_pct*100).toFixed(2) : "—"}</Card>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(4,1fr)",
+            gap: 12,
+            margin: "16px 0",
+          }}
+        >
+          <Card title="Peak viewers">
+            {aggr.topline?.peak_viewers?.toLocaleString("pl-PL") ?? "—"}
+          </Card>
+          <Card title="Average viewers">
+            {aggr.topline?.average_viewers?.toLocaleString("pl-PL") ?? "—"}
+          </Card>
+          <Card title="Points (minutes)">
+            {aggr.topline?.points_minutes ?? "—"}
+          </Card>
+          <Card title="SHR %">
+            {aggr.topline?.shr_pct != null
+              ? (aggr.topline.shr_pct * 100).toFixed(2)
+              : "—"}
+          </Card>
         </div>
       )}
 
       <Section title="Wykres 5-min">
-        <div style={{ height: 280, background: "#0f172a", borderRadius: 12, padding: 8 }}>
+        <div
+          style={{
+            height: 280,
+            background: "#0f172a",
+            borderRadius: 12,
+            padding: 8,
+          }}
+        >
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
-              <XAxis dataKey="label" minTickGap={32} tick={{ fontSize: 12 }} />
+              <XAxis
+                dataKey="label"
+                minTickGap={32}
+                tick={{ fontSize: 12 }}
+              />
               <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
               <Tooltip
-                formatter={(v: any) => [Number(v).toLocaleString("pl-PL"), "Widzowie"]}
+                formatter={(v: any) => [
+                  Number(v).toLocaleString("pl-PL"),
+                  "Widzowie",
+                ]}
                 labelFormatter={(l) => `Czas: ${l}`}
               />
-              <Line type="monotone" dataKey="amr" dot={false} strokeWidth={2} activeDot={{ r: 4 }} />
+              <Line
+                type="monotone"
+                dataKey="amr"
+                dot={false}
+                strokeWidth={2}
+                activeDot={{ r: 4 }}
+              />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -86,7 +165,9 @@ export default function ProgramyPage() {
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ textAlign: "left", borderBottom: "1px solid #233" }}>
+              <tr
+                style={{ textAlign: "left", borderBottom: "1px solid #233" }}
+              >
                 <th style={{ padding: 8 }}>#</th>
                 <th style={{ padding: 8 }}>Tytuł</th>
                 <th style={{ padding: 8 }}>Start</th>
@@ -98,14 +179,33 @@ export default function ProgramyPage() {
             </thead>
             <tbody>
               {(aggr?.program_line || []).map((p: any, i: number) => (
-                <tr key={p.slug || i} style={{ borderBottom: "1px solid #1b2433" }}>
-                  <td style={{ padding: 8 }}>{p.rank_amr ?? i+1}</td>
-                  <td style={{ padding: 8 }}>{p.title}</td>
+                <tr
+                  key={p.slug || i}
+                  style={{ borderBottom: "1px solid #1b2433" }}
+                >
+                  <td style={{ padding: 8 }}>{p.rank_amr ?? i + 1}</td>
+                  <td style={{ padding: 8 }}>
+                    {/* CLICKABLE TITLE → program trend */}
+                    <Link
+                      to={`/trend?date=${encodeURIComponent(
+                        date
+                      )}&slug=${encodeURIComponent(p.slug || p.title)}`}
+                      style={{ color: "#93c5fd" }}
+                    >
+                      {p.title}
+                    </Link>
+                  </td>
                   <td style={{ padding: 8 }}>{fmtTime(p.start)}</td>
                   <td style={{ padding: 8 }}>{fmtTime(p.end)}</td>
-                  <td style={{ padding: 8 }}>{p.duration_min ?? "—"}</td>
-                  <td style={{ padding: 8 }}>{p.amr?.toLocaleString("pl-PL") ?? "—"}</td>
-                  <td style={{ padding: 8 }}>{p.shr_pct != null ? (p.shr_pct*100).toFixed(2) : "—"}</td>
+                  <td style={{ padding: 8 }}>
+                    {p.duration_min != null ? p.duration_min : "—"}
+                  </td>
+                  <td style={{ padding: 8 }}>
+                    {p.amr != null ? p.amr.toLocaleString("pl-PL") : "—"}
+                  </td>
+                  <td style={{ padding: 8 }}>
+                    {p.shr_pct != null ? (p.shr_pct * 100).toFixed(2) : "—"}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -113,7 +213,9 @@ export default function ProgramyPage() {
         </div>
       </Section>
 
-      {loading && <div style={{ marginTop: 12, opacity: 0.7 }}>Ładowanie…</div>}
+      {loading && (
+        <div style={{ marginTop: 12, opacity: 0.7 }}>Ładowanie…</div>
+      )}
     </div>
   );
 }
